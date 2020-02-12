@@ -34,13 +34,18 @@ If you wish to replace original wheel:
 
 # TODOs
 
-1. try second approach with globoid worm, which is suprisingly easeire, see www.otvinta.com/tutorial02.html
+1. try second approach with globoid worm, which is suprisingly easier, see www.otvinta.com/tutorial02.html
    pro: easier wheel, defined fully parametrical without cutting operation.
    contra: warm must be printed with support
 
 2. worm with more than one teeth/thread
 
 3. add drive joint
+
+4. experiment with UI update while computing geometry
+
+5. add mode with cutting all around ( without circle pattern ), add timing measurement and compare both trategies
+
 
 # Notes for Developers
 
@@ -72,10 +77,10 @@ class Model:
         # Terminology by http://www.tandwiel.info/de/verzahnungen/nomenklatur-verzahnungen-tandwiel-info/
         
         # Multiply module by 0.1 to convert from mm into internal cm unit
-        self.module=0.1*1
-        self.pressureAngle=fromGrad(20)
-        self.wheelTeethNumber=20.0 # must be even number
-        self.wormRotations=5
+        self.module = 0.1*1
+        self.pressureAngle = fromGrad(20)
+        self.wheelTeethNumber = 10 # must be even number
+        self.wormRotations = 5
 
         '''
         2  - for initial testing
@@ -84,45 +89,55 @@ class Model:
         17 - probably some cut errors, result quality OK
         20 - probably somecut errors,  result quality perfect even for undercut if pressent
         '''
-        self.cuttingStepsProWormTurn=2 # min 2
+        self.cuttingStepsProWormTurn = 30 # minimal 2
 
         # switch on for development
-        self.timelineCapture = False
+        self.timelineCapture = True
 
-        # due to mysterious gaps increase revolve angle of initial body by 1%
-        self.oversizeToAvoidGapsInCircularrPattern = 1.01
+        #
+        # tweeking parameters
+        #
+
+        # due to mysterious gaps increase revolve angle of initial body by 1%, test if really needed in particular case
+        #self.oversizeToAvoidGapsInCircularrPattern = 1.01
+        self.oversizeToAvoidGapsInCircularrPattern = 1
+
+        # top profile of cutting worm may rounded with small filets 
+        # or replaced by big arc - usefoul to make an underuct for small
+        # wheels very smooth
+        self.cuttingTopProfileAsArc=True
 
         # END OF PARAMETERS SECTION YOU MAY/SHOUD ADJUST
         ###################################################
 
+        if(True):
+            # 
+            # calculated gear parameters
+            #
+            self.pich=self.module*math.pi
+            self.addendum=1.16*self.module
+            self.dedendum=1.25*self.module
+            self.fillet=0.1*self.module
+            self.clearanceBottom=0.1*self.module
+            self.clearanceTop=0.2*self.module
 
-        # 
-        # calculated gear parameters
-        #
-        self.pich=self.module*math.pi
-        self.addendum=1.16*self.module
-        self.dedendum=1.25*self.module
-        self.fillet=0.1*self.module
-        self.clearanceBottom=0.1*self.module
-        self.clearanceTop=0.2*self.module
+            self.wormReferenceDiameter = 12*self.module
+            self.wormReferenceRadius = self.wormReferenceDiameter/2
+            self.wormLength = self.pich*self.wormRotations
+            self.wormLeadAngle=math.atan(self.pich/(math.pi*self.wormReferenceDiameter))
 
-        self.wormReferenceDiameter = 12*self.module
-        self.wormReferenceRadius = self.wormReferenceDiameter/2
-        self.wormLength = self.pich*self.wormRotations
-        self.wormLeadAngle=math.atan(self.pich/(math.pi*self.wormReferenceDiameter))
+            self.wheelAngularPich=2.0*math.pi/self.wheelTeethNumber
+            self.wheelDiameter=self.module*self.wheelTeethNumber
+            self.wheelStrenght=self.wormReferenceRadius*2
 
-        self.wheelAngularPich=2.0*math.pi/self.wheelTeethNumber
-        self.wheelDiameter=self.module*self.wheelTeethNumber
-        self.wheelStrenght=self.wormReferenceRadius*2
-
-        #
-        # documentation text
-        #
-        self.textLocationPoint3D = adsk.core.Point3D.create(0, -self.wheelDiameter, 0)
-        self.textSize=2*self.module
-        self.textStyle = adsk.fusion.TextStyles.TextStyleBold
-        self.textFontName = 'Courier New'
-        self.textLineSpacing = 6 * self.textSize
+            #
+            # documentation text
+            #
+            self.textLocationPoint3D = adsk.core.Point3D.create(0, -self.wheelDiameter, 0)
+            self.textSize=2*self.module
+            self.textStyle = adsk.fusion.TextStyles.TextStyleBold
+            self.textFontName = 'Courier New'
+            self.textLineSpacing = 6 * self.textSize
 
 class Components:
     def __init__(self,app):
@@ -233,6 +248,7 @@ def run(context):
         if(True):
             printlnOnMainSketch( 'axis distance  = '+str(10*(m.wormReferenceRadius+m.wheelDiameter/2))+'mm' )
             printlnOnMainSketch( 'teeth on wheel = '+str(m.wheelTeethNumber) )
+            printlnOnMainSketch( 'cutting steps pro worm turn = '+str(m.cuttingStepsProWormTurn) )
 
         if(True):
             #
@@ -266,7 +282,7 @@ def run(context):
                 try:
                     combineFeatures.add(combineFeatureInput)
                 except:
-                    print( 'Cut produces exception, just ignoring this time...\n' )
+                    print( 'Cut produces exception, just ignoring, this will hopefully work anyway...' )
 
                 rotateWheel(wheelComponent, wheelAxisLine, whealRotationAngle)
 
@@ -404,10 +420,6 @@ def metricProfile(sketch, csMain, milling):
         csSideLine.point( +addedndum , -addedndum*math.tan(m.pressureAngle), 0 ), 
     )
 
-    topLine = lines.addByTwoPoints(
-        sideLineMiddleTop.endSketchPoint,
-        csMain.point(addedndum,0,0)
-    )
 
     bottomFillet = sketch.sketchCurves.sketchArcs.addFillet(
         bottomLine, bottomLine.endSketchPoint.geometry, 
@@ -415,11 +427,18 @@ def metricProfile(sketch, csMain, milling):
         m.fillet
     )
 
-    topFillet = sketch.sketchCurves.sketchArcs.addFillet(
-        sideLineMiddleTop, sideLineMiddleTop.endSketchPoint.geometry, 
-        topLine, topLine.startSketchPoint.geometry,
-        m.fillet
-    )
+
+    if( not milling or not m.cuttingTopProfileAsArc ):
+        topLine = lines.addByTwoPoints(
+            sideLineMiddleTop.endSketchPoint,
+            csMain.point(addedndum,0,0)
+        )
+
+        topFillet = sketch.sketchCurves.sketchArcs.addFillet(
+            sideLineMiddleTop, sideLineMiddleTop.endSketchPoint.geometry, 
+            topLine, topLine.startSketchPoint.geometry,
+            m.fillet
+        )
 
     bottomProfileClosing = lines.addByTwoPoints(
         bottomLine.endSketchPoint,
@@ -444,15 +463,26 @@ def metricProfile(sketch, csMain, milling):
     )
 
     sideLineMiddleTopMirrored = mirrorLineY(sketch, sideLineMiddleTop)
-    topLineMirrored = mirrorLineY(sketch, topLine)
-
-    sketch.sketchCurves.sketchArcs.addFillet(
-        sideLineMiddleTopMirrored, sideLineMiddleTopMirrored.endSketchPoint.geometry,
-        topLineMirrored, topLineMirrored.startSketchPoint.geometry, 
-        m.fillet
-    )
 
     bottomProfileClosingMirrored = mirrorLineY(sketch, bottomProfileClosing)
+
+    if( milling and m.cuttingTopProfileAsArc ):
+        # make radius rounding top of the tooth
+        # round top make an smooth undercut for wheels with small
+        # number of teeth
+        sketch.sketchCurves.sketchArcs.addByCenterStartSweep(
+            adsk.core.Point3D.create( sideLineMiddleTop.endSketchPoint.geometry.x - math.tan(m.pressureAngle) * sideLineMiddleTop.endSketchPoint.geometry.y , 0, 0) , 
+            sideLineMiddleTop.endSketchPoint.geometry,
+            -(math.pi-2*m.pressureAngle)
+        )
+    else:
+        topLineMirrored = mirrorLineY(sketch, topLine)
+
+        sketch.sketchCurves.sketchArcs.addFillet(
+            sideLineMiddleTopMirrored, sideLineMiddleTopMirrored.endSketchPoint.geometry,
+            topLineMirrored, topLineMirrored.startSketchPoint.geometry, 
+            m.fillet
+        )
 
     # calculate radius of the core
     pointOnYAxis = bottomFillet.worldGeometry.startPoint.copy()
@@ -493,12 +523,6 @@ def makeWorm(wormComponentParam, wormProfilePlane, wormAxisLine, milling):
 #TODO: write perfect mirrr function based on https://www.geeksforgeeks.org/find-mirror-image-point-2-d-plane/ , or wait until Fusin implements mirroring
 def mirrorLineY(sketch,sketchLine):
     return sketch.sketchCurves.sketchLines.addByTwoPoints(
-        point( sketchLine.geometry.startPoint.x, -sketchLine.geometry.startPoint.y, 0 ),
-        point( sketchLine.geometry.endPoint.x,   -sketchLine.geometry.endPoint.y,   0)
-    )
-
-def mirrorFilletY(sketch,fillet):
-    return sketch.sketchCurves.sketchArcs.add (
         point( sketchLine.geometry.startPoint.x, -sketchLine.geometry.startPoint.y, 0 ),
         point( sketchLine.geometry.endPoint.x,   -sketchLine.geometry.endPoint.y,   0)
     )
