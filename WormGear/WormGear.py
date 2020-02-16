@@ -46,7 +46,6 @@ If you wish to replace original wheel:
 
 5. add mode with cutting all around ( without circle pattern ), add timing measurement and compare both trategies
 
-
 # Notes for Developers
 
 1. the construct if(True):... is uses to help fold a code in text editor.
@@ -79,17 +78,18 @@ class Model:
         # Multiply module by 0.1 to convert from mm into internal cm unit
         self.module = 0.1*1
         self.pressureAngle = fromGrad(20)
-        self.wheelTeethNumber = 10 # must be even number
+        self.wheelTeethNumber = 60 # must be even number
         self.wormRotations = 5
+        self.wormAxisAngle = fromGrad(15)
 
         '''
         2  - for initial testing
         10 - OK
         15 - OK
         17 - probably some cut errors, result quality OK
-        20 - probably somecut errors,  result quality perfect even for undercut if pressent
+        20 - probably somecut errors,  result quality perfect, long calculating time, many small faces
         '''
-        self.cuttingStepsProWormTurn = 30 # minimal 2
+        self.cuttingStepsProWormTurn = 20 # minimal 2
 
         # switch on for development
         self.timelineCapture = True
@@ -133,7 +133,7 @@ class Model:
             #
             # documentation text
             #
-            self.textLocationPoint3D = adsk.core.Point3D.create(0, -self.wheelDiameter, 0)
+            self.textLocationPoint3D = adsk.core.Point3D.create(0, -max( self.wheelDiameter, self.wormLength ) , 0 )
             self.textSize=2*self.module
             self.textStyle = adsk.fusion.TextStyles.TextStyleBold
             self.textFontName = 'Courier New'
@@ -175,24 +175,24 @@ def run(context):
         if( not m.timelineCapture ):
             c.design.designType = adsk.fusion.DesignTypes.DirectDesignType
 
-        # sketch worm gear main sketch - worm core and wheel 
+        c.documentationSketch = c.sketches.add(c.planeXY)
+        c.documentationSketch.name = 'Documentation'
+
+        # main sketch
         if(True):
-            c.documentationSketch = c.sketches.add(c.planeXY)
-            c.documentationSketch.name = 'Documentation'
+            # sketch worm gear main sketch - worm core and wheel 
+            wheelMainSketch = c.rootComp.sketches.add(c.planeXY)
+            wheelMainSketch.name = "Main"
 
-            mainSketch = c.sketches.add(c.planeXY)
-            mainSketch.name = "Main"
+            # pich circle
+            circles = wheelMainSketch.sketchCurves.sketchCircles
+            pichCircle = circles.addByCenterRadius( point( m.wormReferenceRadius+m.wheelDiameter/2, 0, 0), m.wheelDiameter/2 )
+            pichCircle.isConstruction = True
 
-            # lines definiing core
-            lines = mainSketch.sketchCurves.sketchLines
-            cs = CoordinateSystem(0,-m.wormLength/2,0)
-            wormAxisLine =                  lines.addByTwoPoints( cs.point(0, 0, 0), cs.point(0, m.wormLength, 0) )
-            wormProfileSketchPlaneLine =    lines.addByTwoPoints( wormAxisLine.startSketchPoint, cs.point(m.wormReferenceRadius, 0, 0) )
-            wormCoreCylinderLine =          lines.addByTwoPoints( wormProfileSketchPlaneLine.endSketchPoint , cs.point(m.wormReferenceRadius, m.wormLength, 0) )
-            wormCoreCylinderLine.isConstruction=True
-            wormCoreEndEdge =               lines.addByTwoPoints( wormAxisLine.endSketchPoint, wormCoreCylinderLine.endSketchPoint )
-        
             # construction line for placing wheel cross section sketch
+            lines = wheelMainSketch.sketchCurves.sketchLines
+            # cs = CoordinateSystem(0,0,0)
+            # cs.drawAxies(lines)
             wheelCrossSectionPlaneConstructionLine = lines.addByTwoPoints( point(m.wormReferenceRadius, 0, m.module), point(m.wormReferenceRadius, 0, -m.module) )
             wheelCrossSectionPlaneConstructionLine.isConstruction = True
 
@@ -200,55 +200,41 @@ def run(context):
             wheelAxisLine = lines.addByTwoPoints( point( m.wormReferenceRadius+m.wheelDiameter/2, 0, m.module), point( m.wormReferenceRadius+m.wheelDiameter/2, 0, -m.module) )
             wheelAxisLine.isConstruction = True
 
-            # pich circle
-            circles = mainSketch.sketchCurves.sketchCircles
-            pichCircle = circles.addByCenterRadius( point( m.wormReferenceRadius+m.wheelDiameter/2, 0, 0), m.wheelDiameter/2 )
-            pichCircle.isConstruction = True
+            # construction line for  placing angled worm plane
+            wormPlaneConstructionLine = lines.addByTwoPoints( point(m.wormReferenceRadius, 0,0), point(-m.wormReferenceRadius, 0,0) )
+            wormPlaneConstructionLine.isConstruction = True
 
-        # wheel profile
+        wheelComponent = makeWheelFragment(wheelAxisLine)
+
+        # main worm sketch
         if(True):
-            # create a wheel component under root component
-            occ1 = c.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-            wheelComponent = occ1.component
-            wheelComponent.name="Wheel"
+            # construction plane for placing worm sketch
+            constructionPlaneInput = c.rootComp.constructionPlanes.createInput()
+            constructionPlaneInput.setByAngle( wormPlaneConstructionLine, byReal(  -m.wormAxisAngle ), c.rootComp.xYConstructionPlane )
+            wormConstructionPlane = c.rootComp.constructionPlanes.add( constructionPlaneInput )
 
-            sketchWheelProfile = wheelComponent.sketches.add(c.planeXZ)
-            sketchWheelProfile.name = "WheelProfile"
-            lines = sketchWheelProfile.sketchCurves.sketchLines
-            cs = CoordinateSystem(m.wormReferenceRadius, 0, 0)
-            lineUp         = lines.addByTwoPoints( cs.point(-m.dedendum*2,-m.wheelStrenght/2,0), cs.point(m.addendum*2,-m.wheelStrenght/2,0) )
-            lineInternalEdge = lines.addByTwoPoints( lineUp.endSketchPoint , cs.point(m.addendum*2, m.wheelStrenght/2,0) )
-            lineDown         = lines.addByTwoPoints( lineInternalEdge.endSketchPoint , cs.point(-m.dedendum*2, m.wheelStrenght/2,0) )
-            lineInternalEdge = lines.addByTwoPoints( lineDown.endSketchPoint , lineUp.startSketchPoint )
-            wheelProfile = sketchWheelProfile.profiles.item(0)
+            mainSketch = c.rootComp.sketches.add( wormConstructionPlane )
+            mainSketch.name = "WormPlacement"
 
-            revolveFeatureInput = wheelComponent.features.revolveFeatures.createInput(wheelProfile, wheelAxisLine, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            
-            
-            revolveFeatureInput.setAngleExtent(True, byReal( m.oversizeToAvoidGapsInCircularrPattern * m.wheelAngularPich ) )
+            lines = mainSketch.sketchCurves.sketchLines
 
-            wheelExtrusion = wheelComponent.features.revolveFeatures.add(revolveFeatureInput)
+            cs = CoordinateSystem( 0, 0, 0 )
+            cs.directionX=-1
+            cs.directionY=-1    
+            cs.drawAxies(lines)
+            wormAxisLine =                  lines.addByTwoPoints( cs.point(0, -m.wormLength/2, 0), cs.point(0, m.wormLength/2, 0) )
+            # wormAxisLine.isConstruction = True
+            wormProfileSketchPlaneLine =    lines.addByTwoPoints( cs.point(-m.wormReferenceRadius, -m.wormLength/2, 0), cs.point(m.wormReferenceRadius, -m.wormLength/2, 0) )
+            wormProfileSketchPlaneLine.isConstruction = True
+            # wormCoreCylinderLine =          lines.addByTwoPoints( wormProfileSketchPlaneLine.endSketchPoint , cs.point(m.wormReferenceRadius, m.wormLength/2, 0) )
+            # wormCoreCylinderLine.isConstruction=True
+            # wormCoreEndEdge =               lines.addByTwoPoints( wormAxisLine.endSketchPoint, wormCoreCylinderLine.endSketchPoint )
+            # wormCoreEndEdge.isConstruction = True
 
-        # milling worm tooth profile
-        if(True):
-            occ1 = c.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-            wormMillComponent = occ1.component
-            wormMillComponent.name="WormMill"
+        # make cutting worm
+        wormCuttingComponent = makeWorm(wormConstructionPlane, wormProfileSketchPlaneLine, wormPlaneConstructionLine, wormAxisLine, True)
 
-            # Get construction planes
-            planeInput = c.planes.createInput()
-
-            # Add construction plane angled from 
-            leadAngleValueInput = byReal( m.wormLeadAngle )
-            planeInput.setByAngle(wormProfileSketchPlaneLine, leadAngleValueInput, c.planeXY)
-            wormProfilePlane = c.planes.add(planeInput)
-            makeWorm(wormMillComponent, wormProfilePlane, wormAxisLine, True)
-
-        # documentation
-        if(True):
-            printlnOnMainSketch( 'axis distance  = '+str(10*(m.wormReferenceRadius+m.wheelDiameter/2))+'mm' )
-            printlnOnMainSketch( 'teeth on wheel = '+str(m.wheelTeethNumber) )
-            printlnOnMainSketch( 'cutting steps pro worm turn = '+str(m.cuttingStepsProWormTurn) )
+        sketchDocumentation()
 
         if(True):
             #
@@ -268,7 +254,7 @@ def run(context):
                 #
                 # cut
                 #
-                wormBody = wormMillComponent.bRepBodies.item(0)
+                wormBody = wormCuttingComponent.bRepBodies.item(0)
                 wheelBody  = wheelComponent.bRepBodies.item(0)
         
                 toolBodies = adsk.core.ObjectCollection.create()
@@ -282,7 +268,7 @@ def run(context):
                 try:
                     combineFeatures.add(combineFeatureInput)
                 except:
-                    print( 'Cut produces exception, just ignoring, this will hopefully work anyway...' )
+                    print( 'Cut produces exception, just ignoring, it will hopefully work anyway...' )
 
                 rotateWheel(wheelComponent, wheelAxisLine, whealRotationAngle)
 
@@ -299,7 +285,7 @@ def run(context):
                 transform.setToRotation( -wormRotationAngle, wormAxisLine.worldGeometry.asInfiniteLine().direction, wormAxisLine.worldGeometry.startPoint)
 
                 # Create a move feature
-                moveFeatures = wormMillComponent.features.moveFeatures
+                moveFeatures = wormCuttingComponent.features.moveFeatures
                 moveFeatureInput = moveFeatures.createInput(entitiesForRotation, transform)
                 moveFeatures.add(moveFeatureInput)
 
@@ -314,7 +300,7 @@ def run(context):
             circularPatternFeaturesInput.totalAngle = byReal(2*math.pi)
             circularFeature = circularPatternFeatures.add(circularPatternFeaturesInput)
 
-            # combine teeth into whole wheel
+            # combine wheel fragments into whole wheel
             toolBodies = adsk.core.ObjectCollection.create()
             for i in range(1, wheelComponent.bRepBodies.count):
                 toolBodies.add( wheelComponent.bRepBodies.item(i) )
@@ -328,11 +314,7 @@ def run(context):
             wheelBody.name = "Wheel_"+str(m.wheelTeethNumber)
 
         # make final work-worm
-        if(True):
-            occ1 = c.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-            wormComponent = occ1.component
-            wormComponent.name="Worm"
-            makeWorm(wormComponent, wormProfilePlane, wormAxisLine, False)
+        wormComponent = makeWorm(wormConstructionPlane, wormProfileSketchPlaneLine, wormPlaneConstructionLine, wormAxisLine, False)
 
         #
         # finishing work
@@ -341,8 +323,8 @@ def run(context):
         # activate root component
         c.design.activateRootComponent()
 
-        # deactivate milling worm
-        c.rootComp.allOccurrencesByComponent(wormMillComponent).item(0).isLightBulbOn = False
+        # deactivate cutting worm
+        c.rootComp.allOccurrencesByComponent(wormCuttingComponent).item(0).isLightBulbOn = False
         # show documentation sketch
         c.documentationSketch.isLightBulbOn = True
 
@@ -370,14 +352,24 @@ class CoordinateSystem:
         self.offsetX=0
         self.offsetY=0
         self.offsetZ=0
+        self.directionX=1
+        self.directionY=1
+        self.directionZ=1
 
     def __init__( self, x, y, z ):
         self.offsetX=x
         self.offsetY=y
         self.offsetZ=z
+        self.directionX=1
+        self.directionY=1
+        self.directionZ=1
 
     def point( self, x, y, z ):
-        return point(x+self.offsetX, y+self.offsetY, z+self.offsetZ)
+        return point( 
+            self.directionX * (x+self.offsetX), 
+            self.directionY * (y+self.offsetY) , 
+            self.directionZ * (z+self.offsetZ)
+        )
 
     def drawAxies( self, lines ):
             x = lines.addByTwoPoints(self.point(0, 0, 0), self.point(10, 0, 0))
@@ -385,7 +377,98 @@ class CoordinateSystem:
             y = lines.addByTwoPoints(self.point(0, 0, 0), self.point(0, 5, 0))
             y.isConstruction=True
 
-def metricProfile(sketch, csMain, milling):
+    def mirrorPointY(self, pointY):
+        return -(pointY - self.directionY * self.offsetY)
+
+    #TODO: write perfect mirrr function based on https://www.geeksforgeeks.org/find-mirror-image-point-2-d-plane/ , or wait until Fusin implements mirroring
+    def mirrorLineY(self, sketch, sketchLine):
+        return sketch.sketchCurves.sketchLines.addByTwoPoints(
+            self.point( sketchLine.geometry.startPoint.x - self.directionX*self.offsetX , self.mirrorPointY(sketchLine.geometry.startPoint.y), 0 ),
+            self.point( sketchLine.geometry.endPoint.x   - self.directionX*self.offsetX , self.mirrorPointY(sketchLine.geometry.endPoint.y),   0)
+        )
+
+
+def makeWheelFragment(wheelAxisLine):
+    # create a wheel component under root component
+    occ1 = c.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+    wheelComponent = occ1.component
+    wheelComponent.name="Wheel"
+
+    # wheel profile
+    sketchWheelProfile = wheelComponent.sketches.add(c.planeXZ)
+    sketchWheelProfile.name = "WheelProfile"
+    lines = sketchWheelProfile.sketchCurves.sketchLines
+    cs = CoordinateSystem(m.wormReferenceRadius, 0, 0)
+    lineUp         = lines.addByTwoPoints( cs.point(-m.dedendum*2,-m.wheelStrenght/2,0), cs.point(m.addendum*2,-m.wheelStrenght/2,0) )
+    lineInternalEdge = lines.addByTwoPoints( lineUp.endSketchPoint , cs.point(m.addendum*2, m.wheelStrenght/2,0) )
+    lineDown         = lines.addByTwoPoints( lineInternalEdge.endSketchPoint , cs.point(-m.dedendum*2, m.wheelStrenght/2,0) )
+    lineInternalEdge = lines.addByTwoPoints( lineDown.endSketchPoint , lineUp.startSketchPoint )
+    wheelProfile = sketchWheelProfile.profiles.item(0)
+
+    revolveFeatureInput = wheelComponent.features.revolveFeatures.createInput(wheelProfile, wheelAxisLine, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    
+    revolveFeatureInput.setAngleExtent(True, byReal( m.oversizeToAvoidGapsInCircularrPattern * m.wheelAngularPich ) )
+
+    wheelExtrusion = wheelComponent.features.revolveFeatures.add(revolveFeatureInput)
+
+    return wheelComponent
+
+def makeWorm(wormConstructionPlane, wormProfileSketchPlaneLine, wormPlaneConstructionLine, wormAxisLine, cutting):
+    occ1 = c.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+    wormComponent = occ1.component
+    if( cutting ):
+        wormComponent.name="WormCutting"
+    else:
+        wormComponent.name="Worm"
+
+    #
+    # tooth profile
+    #
+
+    # Get construction planes
+    planeInput = wormComponent.constructionPlanes.createInput()
+
+    # Add construction plane angled from 
+    planeInput.setByAngle(wormProfileSketchPlaneLine, byReal( m.wormLeadAngle ), wormConstructionPlane)
+    wormProfilePlane = wormComponent.constructionPlanes.add(planeInput)
+
+    wormProfileSketch = wormComponent.sketches.add(wormProfilePlane)
+    wormProfileSketch.name="Profile"
+
+    cs = CoordinateSystem( m.wormReferenceRadius, 0, 0 )
+    
+    wormCoreRadiusCalibrated = metricProfile(wormProfileSketch, cs, cutting)
+
+    #
+    # worm core
+    #
+
+    # construction plane for placing worm core sketch
+    constructionPlaneInput = wormComponent.constructionPlanes.createInput()
+    constructionPlaneInput.setByAngle( wormPlaneConstructionLine, byReal( -(m.wormAxisAngle+math.pi/2) ), c.rootComp.xYConstructionPlane )
+    wormCoreConstructionPlane = wormComponent.constructionPlanes.add( constructionPlaneInput )
+
+    sketchWormCore = wormComponent.sketches.add(wormCoreConstructionPlane)
+    sketchWormCore.name = "Core"
+    sketchWormCore.sketchCurves.sketchCircles.addByCenterRadius( point(0,0,0), wormCoreRadiusCalibrated )
+    
+    extrudeFeatureInput = wormComponent.features.extrudeFeatures.createInput( sketchWormCore.profiles.item(0), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    extrudeFeatureInput.setSymmetricExtent(byReal(m.wormLength+m.pich), True)
+    wormComponent.features.extrudeFeatures.add(extrudeFeatureInput)
+
+    # Create a sweep input
+    wormAxisPath = wormComponent.features.createPath(wormAxisLine, False) # no chaining
+    
+    sweepInput = wormComponent.features.sweepFeatures.createInput( wormProfileSketch.profiles.item(0) ,wormAxisPath, adsk.fusion.FeatureOperations.JoinFeatureOperation )
+    sweepInput.twistAngle = byReal( 2*math.pi*m.wormRotations )
+    sweepInput.orientation = adsk.fusion.SweepOrientationTypes.PerpendicularOrientationType
+    
+    # Create the sweep.
+    sweep = wormComponent.features.sweepFeatures.add(sweepInput)
+
+    return wormComponent
+
+def metricProfile(sketch, cs, cutting):
     '''
     milling=True for milling/cutting profile
     milling=False for final profile of the worm used for print
@@ -396,17 +479,17 @@ def metricProfile(sketch, csMain, milling):
     global m
 
     lines = sketch.sketchCurves.sketchLines
+    cs.drawAxies(lines)
 
     # move cs to 1/4 of pich line
-    csSideLine = CoordinateSystem(csMain.offsetX, csMain.offsetY+m.pich/4, csMain.offsetZ)
-    csSideLine.drawAxies(lines)
+    csSideLine = CoordinateSystem(cs.offsetX, cs.offsetY+m.pich/4, cs.offsetZ)
 
     # draw angled line, substract clearance if milling
-    dedendunm = m.dedendum - (m.clearanceBottom if milling else 0)
-    addedndum = m.addendum + (m.clearanceTop if milling else 0)
+    dedendunm = m.dedendum - (m.clearanceBottom if cutting else 0)
+    addedndum = m.addendum + (m.clearanceTop if cutting else 0)
 
     bottomLine = lines.addByTwoPoints(
-        csMain.point(-dedendunm,m.pich/2,0),
+        cs.point(-dedendunm,m.pich/2,0),
         csSideLine.point( -dedendunm , dedendunm*math.tan(m.pressureAngle), 0 )
     )
 
@@ -420,18 +503,16 @@ def metricProfile(sketch, csMain, milling):
         csSideLine.point( +addedndum , -addedndum*math.tan(m.pressureAngle), 0 ), 
     )
 
-
     bottomFillet = sketch.sketchCurves.sketchArcs.addFillet(
         bottomLine, bottomLine.endSketchPoint.geometry, 
         sideLineBottomMiddle, sideLineBottomMiddle.startSketchPoint.geometry, 
         m.fillet
     )
 
-
-    if( not milling or not m.cuttingTopProfileAsArc ):
+    if( not cutting or not m.cuttingTopProfileAsArc ):
         topLine = lines.addByTwoPoints(
             sideLineMiddleTop.endSketchPoint,
-            csMain.point(addedndum,0,0)
+            cs.point(addedndum,0,0)
         )
 
         topFillet = sketch.sketchCurves.sketchArcs.addFillet(
@@ -442,19 +523,19 @@ def metricProfile(sketch, csMain, milling):
 
     bottomProfileClosing = lines.addByTwoPoints(
         bottomLine.endSketchPoint,
-        csMain.point( -dedendunm, 0, 0)
+        cs.point( -dedendunm, 0, 0)
     )
+
     # unused for now
     symetryLine = lines.addByTwoPoints(
-        csMain.point( -dedendunm, 0, 0),
-        csMain.point( addedndum, 0, 0)
+        cs.point( -dedendunm, 0, 0),
+        cs.point( addedndum, 0, 0)
     )
     symetryLine.isConstruction=True
 
     # mirror profile, mirroring not supported by API, do it manually
-    bottomLineMirrored = mirrorLineY(sketch, bottomLine)
-
-    sideLineBottomMiddleMirrored = mirrorLineY(sketch, sideLineBottomMiddle)
+    bottomLineMirrored = cs.mirrorLineY(sketch, bottomLine)
+    sideLineBottomMiddleMirrored = cs.mirrorLineY(sketch, sideLineBottomMiddle)
 
     sketch.sketchCurves.sketchArcs.addFillet(
         bottomLineMirrored, bottomLineMirrored.endSketchPoint.geometry, 
@@ -462,11 +543,11 @@ def metricProfile(sketch, csMain, milling):
         m.fillet
     )
 
-    sideLineMiddleTopMirrored = mirrorLineY(sketch, sideLineMiddleTop)
+    sideLineMiddleTopMirrored = cs.mirrorLineY(sketch, sideLineMiddleTop)
 
-    bottomProfileClosingMirrored = mirrorLineY(sketch, bottomProfileClosing)
+    bottomProfileClosingMirrored = cs.mirrorLineY(sketch, bottomProfileClosing)
 
-    if( milling and m.cuttingTopProfileAsArc ):
+    if( cutting and m.cuttingTopProfileAsArc ):
         # make radius rounding top of the tooth
         # round top make an smooth undercut for wheels with small
         # number of teeth
@@ -476,7 +557,7 @@ def metricProfile(sketch, csMain, milling):
             -(math.pi-2*m.pressureAngle)
         )
     else:
-        topLineMirrored = mirrorLineY(sketch, topLine)
+        topLineMirrored = cs.mirrorLineY(sketch, topLine)
 
         sketch.sketchCurves.sketchArcs.addFillet(
             sideLineMiddleTopMirrored, sideLineMiddleTopMirrored.endSketchPoint.geometry,
@@ -489,43 +570,6 @@ def metricProfile(sketch, csMain, milling):
     pointOnYAxis.x=0
     pointOnYAxis.z=0
     return bottomFillet.worldGeometry.startPoint.distanceTo(pointOnYAxis)
-
-def makeWorm(wormComponentParam, wormProfilePlane, wormAxisLine, milling):
-    wormProfileSketch = wormComponentParam.sketches.add(wormProfilePlane)
-    wormProfileSketch.name="WormProfile"
-
-    # make coordinate system in the midle of origin, move Y by worm radius
-    csMain = CoordinateSystem( m.wormReferenceRadius/2, 0, 0 )
-    # csMain.drawAxies(lines)
-    
-    wormCoreRadiusCalibrated = metricProfile(wormProfileSketch, csMain, milling)
-
-    # milling worm core
-    sketchWormCore = c.sketches.add(c.planeXZ)
-    sketchWormCore.name = "WormCore"
-    sketchWormCore.sketchCurves.sketchCircles.addByCenterRadius( point(0,0,0), wormCoreRadiusCalibrated )
-    
-    extrudeFeatureInput = wormComponentParam.features.extrudeFeatures.createInput( sketchWormCore.profiles.item(0), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-    extrudeFeatureInput.setSymmetricExtent(byReal(m.wormLength+m.pich), True)
-    wormComponentParam.features.extrudeFeatures.add(extrudeFeatureInput)
-
-    # Create a sweep input
-    wormAxisPath = c.rootComp.features.createPath(wormAxisLine, False) # no chaining
-    
-    sweepInput = wormComponentParam.features.sweepFeatures.createInput( wormProfileSketch.profiles.item(0) ,wormAxisPath, adsk.fusion.FeatureOperations.JoinFeatureOperation )
-    sweepInput.twistAngle = byReal( 2*math.pi*m.wormRotations )
-    sweepInput.orientation = adsk.fusion.SweepOrientationTypes.PerpendicularOrientationType
-    
-    # Create the sweep.
-    sweep = wormComponentParam.features.sweepFeatures.add(sweepInput)
-
-
-#TODO: write perfect mirrr function based on https://www.geeksforgeeks.org/find-mirror-image-point-2-d-plane/ , or wait until Fusin implements mirroring
-def mirrorLineY(sketch,sketchLine):
-    return sketch.sketchCurves.sketchLines.addByTwoPoints(
-        point( sketchLine.geometry.startPoint.x, -sketchLine.geometry.startPoint.y, 0 ),
-        point( sketchLine.geometry.endPoint.x,   -sketchLine.geometry.endPoint.y,   0)
-    )
 
 def rotateWheel(wheelComponent, wheelAxisLine, gearRotationAngle):
     wheelBody  = wheelComponent.bRepBodies.item(0)
@@ -550,3 +594,21 @@ def printlnOnMainSketch(text):
     sketchTextInput.fontName = m.textFontName
     sketchText = sketchTexts.add(sketchTextInput)
     m.textLocationPoint3D.y = m.textLocationPoint3D.y - m.textSize*m.textLineSpacing
+
+def sketchDocumentation():
+    # printlnOnMainSketch( 'axis distance  = '+str(10*(m.wormReferenceRadius+m.wheelDiameter/2))+'mm' )
+    # printlnOnMainSketch( 'teeth on wheel = '+str(m.wheelTeethNumber) )
+    # printlnOnMainSketch( 'cutting steps pro worm turn = '+str(m.cuttingStepsProWormTurn) )
+    # printlnOnMainSketch( 'worm sxis angle = '+str(m.wormLength) )
+    printlnOnMainSketch( 
+        'DESIGN DATA:\n'
+        '   wheel pich diameter = ' + str(10*m.wheelDiameter) + 'mm\n'
+        '   axis distance  = '+str(10*(m.wormReferenceRadius+m.wheelDiameter/2))+'mm\n' +
+        '   worm sxis angle = '+str( round(m.wormAxisAngle * 180/math.pi, 2) ) + '°\n' +
+        '   worm length = '+str(10*m.wormLength)+'mm\n'
+        '\n' +
+        'META DATA:\n'+
+        '   teeth on wheel = '+str(m.wheelTeethNumber) + '\n'
+        '   cutting steps pro worm turn = '+str(m.cuttingStepsProWormTurn) + '\n'
+    )
+
